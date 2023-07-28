@@ -3,6 +3,7 @@
   const boardElemId = "game-board";
   const renderBoard = (b) => drawBoard(boardElemId, b);
   const gameStepIntervalMs = 1000;
+  const clearStepIntervalMs = gameStepIntervalMs / 2;
 
   // Create new updatable game board
   let board = newBoard();
@@ -10,10 +11,12 @@
   // game step function
   const step = async () => {
     renderBoard(board);
-    const result = clearBottomContigous(board);
-    board = result[0];
-    const score = result[1];
-    await delay((gameStepIntervalMs / 10) * score);
+    const score = getBottomContiguous(board);
+    for (let i = 0; i < score; i++) {
+      board = removeBottomRow(board);
+      await delay(clearStepIntervalMs);
+      renderBoard(board);
+    }
     board = iterBoard(board);
     setTimeout(step, gameStepIntervalMs);
   };
@@ -44,18 +47,24 @@ function newBoard(
  * @param {number[][]} gameBoard
  */
 function drawBoard(elemId, gameBoard) {
+  const score = getBottomContiguous(gameBoard);
+  const bottomIndex = gameBoard[0].length - score;
+
   /**
    * Create cell for board render
    * @param {number} value
+   * @param {number} index
    * @returns {HTMLDivElement}
    */
-  function createCell(value) {
+  function createCell(value, index) {
     const cell = document.createElement("div");
     cell.style.width = "20px";
     cell.style.height = cell.style.width;
     cell.style.border = `1px solid rgba(0,0,0,.5)`;
     cell.style.margin = "none";
-    cell.style.backgroundColor = value ? "rgba(32,32,32,1)" : "white";
+    cell.style.backgroundColor = value
+      ? `rgba(${index >= bottomIndex ? "128,0,0" : "32,32,32"},1)`
+      : "white";
     return cell;
   }
 
@@ -68,7 +77,7 @@ function drawBoard(elemId, gameBoard) {
     rowWrapper.style.display = "flex-row";
     rowWrapper.style.alignItems = "center";
     rowWrapper.style.justifyContent = "center";
-    cells.forEach((cellValue) => rowWrapper.appendChild(createCell(cellValue)));
+    cells.map(createCell).forEach((elem) => rowWrapper.appendChild(elem));
     return rowWrapper;
   }
 
@@ -82,7 +91,7 @@ function drawBoard(elemId, gameBoard) {
   boardWrapper.innerHTML = ""; // reset before drawing elements
   gameBoard.forEach((row) => boardWrapper.appendChild(createColumn(row)));
 
-  // highlight bottom rows that are contigous
+  // highlight bottom rows that are contiguous
 }
 
 /**
@@ -115,12 +124,42 @@ function boardEquals(boardA, boardB) {
 }
 
 /**
- * Clear bottom rows that are contigous i.e. no empty spaces below or between
+ * Get bottom rows that are contiguous i.e. no empty spaces below or between
  * @param {number[][]} board
- * @returns {[number[][], number]}
+ * @returns {number}
  */
-function clearBottomContigous(board) {
-  return [board, 0];
+function getBottomContiguous(board) {
+  const width = board.length;
+  const height = board[0].length;
+  let count = 0;
+  for (let i = 0; i < height; i++) {
+    for (let j = 0; j < width; j++) {
+      if (!board[j][height - i - 1]) {
+        return i;
+      }
+    }
+    count = i + 1;
+  }
+  return count;
+}
+
+/**
+ * Pop bottom row from board
+ * @param {number[][]} board
+ * @param {number} count
+ * @returns number[][]
+ */
+function removeBottomRow(board, count = 1) {
+  /**
+   * Remove last cell from column
+   * @param {number[]} cells
+   * @returns {number[]}
+   */
+  function removeLastCell(cells) {
+    return [...new Array(count).fill(0), ...cells.slice(0, -count)];
+  }
+
+  return board.map(removeLastCell);
 }
 
 /**
