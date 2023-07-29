@@ -31,11 +31,7 @@
  * @param {() => number} fillCell
  * @returns {number[][]}
  */
-function newBoard(
-  width = 10,
-  height = 20,
-  fillCell = () => Math.round(Math.random())
-) {
+function newBoard(width = 10, height = 20, fillCell = () => randomInt(0, 1)) {
   return new Array(width)
     .fill(undefined)
     .map(() => new Array(height).fill(undefined).map(fillCell));
@@ -169,4 +165,36 @@ function removeBottomRow(board, count = 1) {
  */
 async function delay(delayMs) {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+/**
+ * Create a tile group that can be placed
+ * @param {number} n number of tiles in group
+ * @returns {number[][]} new tile group
+ */
+function randomGroup(n = 4) {
+  let lastTile = "0,0";
+  const hydrateTile = (t) => t.split(",").map(Number);
+  const group = new Set([lastTile]);
+  // TODO: look up matrix rotation
+  while (group.size < n) {
+    const lastTileHydrated = hydrateTile(lastTile);
+    const leftOrRight = randomInt(-1, 1);
+    lastTile = [
+      lastTileHydrated[0] + leftOrRight,
+      lastTileHydrated[1] + (Math.abs(leftOrRight) ? 0 : randomInt(-1, 1)),
+    ].join(",");
+    group.add(lastTile);
+  }
+  return Array.from(group).sort().map(hydrateTile);
+}
+
+/**
+ * Random number between min and max
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+function randomInt(min, max) {
+  return Math.round(Math.random() * (max - min)) + min;
 }
