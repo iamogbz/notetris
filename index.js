@@ -1,23 +1,35 @@
 (function () {
   // render board constants
+  const boardWidth = 10;
+  const boardHeight = boardWidth * 2;
   const boardElemId = "game-board";
-  const renderBoard = (b) => drawBoard(boardElemId, b);
-  const gameStepIntervalMs = 1000;
+  const renderBoard = (
+    /** @type {readonly (readonly number[])[]} */ b,
+    /** @type {{ value: readonly (readonly number[])[]; x: number; y: number; }} */ f
+  ) => {
+    const gameBoard = cloneBoard(b);
+    f.value.forEach(([x, y]) => {
+      gameBoard[x + f.x][y + f.y] = 1;
+    });
+    drawBoard(boardElemId, gameBoard);
+  };
+  const gameStepIntervalMs = 666;
   const clearStepIntervalMs = gameStepIntervalMs / 2;
 
   // Create new updatable game board
-  let board = newBoard();
+  let board = newBoard(boardWidth, boardHeight, () => 0);
+  let float = newFloat(boardWidth);
 
   // game step function
   const step = async () => {
-    renderBoard(board);
+    renderBoard(board, float);
     const score = getBottomContiguous(board);
     for (let i = 0; i < score; i++) {
       board = removeBottomRow(board);
       await delay(clearStepIntervalMs);
-      renderBoard(board);
+      renderBoard(board, float);
     }
-    board = iterBoard(board);
+    [board, float] = iterBoard(board, float);
     setTimeout(step, gameStepIntervalMs);
   };
 
@@ -29,12 +41,28 @@
  * @param {number} width
  * @param {number} height
  * @param {() => number} fillCell
- * @returns {number[][]}
+ * @returns {readonly (readonly number[])[]}
  */
 function newBoard(width = 10, height = 20, fillCell = () => randomInt(0, 1)) {
-  return new Array(width)
-    .fill(undefined)
-    .map(() => new Array(height).fill(undefined).map(fillCell));
+  return Object.freeze(
+    new Array(width)
+      .fill(undefined)
+      .map(() => Object.freeze(new Array(height).fill(undefined).map(fillCell)))
+  );
+}
+
+/**
+ * Create new floating group at default position
+ * @param {number} boardWidth
+ * @param {number} size
+ * @returns {{ value: readonly (readonly number[])[]; x: number; y: number; }}
+ */
+function newFloat(boardWidth, size = 4) {
+  return {
+    value: randomGroup(size),
+    x: Math.round(boardWidth / 2),
+    y: 0,
+  };
 }
 
 /**
@@ -92,21 +120,40 @@ function drawBoard(elemId, gameBoard) {
 
 /**
  * Iterate board into next state i.e. moving all cells that can be moved downwards
- * @param {number[][]} board
- * @returns {number[][]}
+ * @param {readonly (readonly number[])[]} board
+ * @param {{value: readonly (readonly number[])[], x: number, y: number}} float
+ * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number}]}
  */
-function iterBoard(board) {
+function iterBoard(board, float) {
   /**
    * Iterate column cells
-   * @param {number[]} cells
+   * @param {readonly number[]} cells
    * @returns {number[]}
    */
   function iterColumn(cells) {
     const lastEmptySpace = cells.lastIndexOf(0);
+    if (lastEmptySpace < 0) return [...cells];
     return [0, ...cells.filter((_, i) => i != lastEmptySpace)];
   }
 
-  return board.map(iterColumn);
+  const boardWidth = board.length;
+  const nextBoard = board.map(iterColumn);
+  const nextFloat = { ...float, y: float.y + 1 };
+
+  const hasDropped = float.value.some(([x, y]) => {
+    const column = board[x + float.x];
+    const nextY = y + float.y + 1;
+    return column[nextY] || nextY == column.length;
+  });
+
+  if (hasDropped) {
+    float.value.forEach(([x, y]) => {
+      nextBoard[x + float.x][y + float.y] = 1;
+    });
+    Object.assign(nextFloat, newFloat(boardWidth));
+  }
+
+  return [nextBoard, nextFloat];
 }
 
 /**
@@ -120,8 +167,17 @@ function boardEquals(boardA, boardB) {
 }
 
 /**
+ * Create duplicate board for mutation
+ * @param {readonly (readonly number[])[]} board
+ * @returns {number[][]}
+ */
+function cloneBoard(board) {
+  return JSON.parse(JSON.stringify(board));
+}
+
+/**
  * Get bottom rows that are contiguous i.e. no empty spaces below or between
- * @param {number[][]} board
+ * @param {readonly (readonly number[])[]} board
  * @returns {number}
  */
 function getBottomContiguous(board) {
@@ -141,18 +197,21 @@ function getBottomContiguous(board) {
 
 /**
  * Pop bottom row from board
- * @param {number[][]} board
+ * @param {readonly (readonly number[])[]} board
  * @param {number} count
- * @returns number[][]
+ * @returns {readonly (readonly number[])[]}
  */
 function removeBottomRow(board, count = 1) {
   /**
    * Remove last cell from column
-   * @param {number[]} cells
-   * @returns {number[]}
+   * @param {readonly number[]} cells
+   * @returns {readonly number[]}
    */
   function removeLastCell(cells) {
-    return [...new Array(count).fill(0), ...cells.slice(0, -count)];
+    return Object.freeze([
+      ...new Array(count).fill(0),
+      ...cells.slice(0, -count),
+    ]);
   }
 
   return board.map(removeLastCell);
@@ -170,11 +229,18 @@ async function delay(delayMs) {
 /**
  * Create a tile group that can be placed
  * @param {number} n number of tiles in group
- * @returns {number[][]} new tile group
+ * @returns {readonly (readonly number[])[]} new tile group
  */
 function randomGroup(n = 4) {
   let lastTile = "0,0";
-  const hydrateTile = (t) => t.split(",").map(Number);
+  /**
+   * Turn string tile into js number object
+   * @param {string} t
+   * @returns {readonly number[]}
+   */
+  function hydrateTile(t) {
+    return Object.freeze(t.split(",").map(Number));
+  }
   const group = new Set([lastTile]);
   // TODO: look up matrix rotation
   while (group.size < n) {
@@ -186,7 +252,7 @@ function randomGroup(n = 4) {
     ].join(",");
     group.add(lastTile);
   }
-  return Array.from(group).sort().map(hydrateTile);
+  return Object.freeze(Array.from(group).sort().map(hydrateTile));
 }
 
 /**
