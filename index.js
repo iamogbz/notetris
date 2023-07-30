@@ -7,10 +7,12 @@
   const clearStepIntervalMs = gameStepIntervalMs / 2;
 
   // game actions
-  const renderBoard = (
-    /** @type {readonly (readonly number[])[]} */ b,
-    /** @type {{ value: readonly (readonly number[])[]; x: number; y: number; }} */ f
-  ) => {
+  /**
+   * Render current game board including floating tiles
+   * @param {readonly (readonly number[])[]} b
+   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; }} f
+   */
+  function renderBoard(b, f) {
     const gameBoard = cloneBoard(b);
     f.value.forEach(([x, y]) => {
       gameBoard[x + f.x][y + f.y] = 1;
@@ -56,15 +58,27 @@ function newBoard(width = 10, height = 20, fillCell = () => randomInt(0, 1)) {
 /**
  * Create new floating group at default position
  * @param {number} boardWidth
- * @param {number} size
+ * @param {number} length
  * @returns {{ value: readonly (readonly number[])[]; x: number; y: number; }}
  */
-function newFloat(boardWidth, size = 4) {
+function newFloat(boardWidth, length = 4) {
+  const value = randomGroup(length);
+  const floatWidth = tileGroupWidth(value);
   return {
-    value: randomGroup(size),
-    x: Math.floor(boardWidth / 2),
+    value,
+    x: Math.floor((boardWidth - floatWidth) / 2),
     y: 0,
   };
+}
+
+/**
+ * Get width of tile group on x axis
+ * @param {readonly (readonly number[])[]} value
+ * @returns {number}
+ */
+function tileGroupWidth(value) {
+  const xs = value.map(([x, _]) => x);
+  return Math.max(...xs) - Math.min(...xs);
 }
 
 /**
@@ -128,6 +142,18 @@ function drawBoard(elemId, gameBoard) {
  */
 function iterBoard(board, float) {
   /**
+   * Mutate board adding floating tile to it
+   * @param {number[][]} board
+   * @param {{value: readonly (readonly number[])[], x: number, y: number}} float
+   * @returns {undefined}
+   */
+  function boardWithFloatingTiles(board, float) {
+    float.value.forEach(([x, y]) => {
+      board[x + float.x][y + float.y] = 1;
+    });
+  }
+
+  /**
    * Iterate column cells
    * @param {readonly number[]} cells
    * @returns {number[]}
@@ -149,9 +175,7 @@ function iterBoard(board, float) {
   });
 
   if (hasDropped) {
-    float.value.forEach(([x, y]) => {
-      nextBoard[x + float.x][y + float.y] = 1;
-    });
+    boardWithFloatingTiles(nextBoard, float);
     Object.assign(nextFloat, newFloat(boardWidth));
   }
 
@@ -160,8 +184,8 @@ function iterBoard(board, float) {
 
 /**
  * Compare two boards for equality
- * @param {number[][]} boardA
- * @param {number[][]} boardB
+ * @param {readonly (readonly number[])[]} boardA
+ * @param {readonly (readonly number[])[]} boardB
  * @returns {boolean}
  */
 function boardEquals(boardA, boardB) {
@@ -243,7 +267,14 @@ async function delay(delayMs) {
  * @returns {readonly (readonly number[])[]} new tile group
  */
 function randomGroup(n = 4) {
-  let lastTile = "0,0";
+  /**
+   * Turn tile object into string
+   * @param {readonly number[]} t
+   * @returns {string}
+   */
+  function dehydrateTile(t) {
+    return t.join(",");
+  }
   /**
    * Turn string tile into js number object
    * @param {string} t
@@ -252,18 +283,32 @@ function randomGroup(n = 4) {
   function hydrateTile(t) {
     return Object.freeze(t.split(",").map(Number));
   }
+
+  let lastTile = "0,0";
+  let [minX, minY] = hydrateTile(lastTile);
+
   const group = new Set([lastTile]);
   // TODO: look up matrix rotation
   while (group.size < n) {
     const lastTileHydrated = hydrateTile(lastTile);
     const leftOrRight = randomInt(-1, 1);
-    lastTile = [
-      lastTileHydrated[0] + leftOrRight,
-      lastTileHydrated[1] + (Math.abs(leftOrRight) ? 0 : randomInt(-1, 1)),
-    ].join(",");
+    const nextX = lastTileHydrated[0] + leftOrRight;
+    const nextY =
+      lastTileHydrated[1] + (Math.abs(leftOrRight) ? 0 : randomInt(-1, 1));
+    if (nextX < minX) minX = nextX;
+    if (nextY < minY) minY = nextY;
+    lastTile = dehydrateTile([nextX, nextY]);
     group.add(lastTile);
   }
-  return Object.freeze(Array.from(group).sort().map(hydrateTile));
+
+  return Object.freeze(
+    Array.from(group)
+      .sort()
+      .map((t) => {
+        const tile = hydrateTile(t);
+        return [tile[0] - minX, tile[1] - minY];
+      })
+  );
 }
 
 /**
