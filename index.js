@@ -3,6 +3,10 @@
   const boardWidth = 10;
   const boardHeight = boardWidth * 2;
   const boardElemId = "game-board";
+  const gameStepIntervalMs = 300;
+  const clearStepIntervalMs = gameStepIntervalMs / 2;
+
+  // game actions
   const renderBoard = (
     /** @type {readonly (readonly number[])[]} */ b,
     /** @type {{ value: readonly (readonly number[])[]; x: number; y: number; }} */ f
@@ -13,8 +17,6 @@
     });
     drawBoard(boardElemId, gameBoard);
   };
-  const gameStepIntervalMs = 666;
-  const clearStepIntervalMs = gameStepIntervalMs / 2;
 
   // Create new updatable game board
   let board = newBoard(boardWidth, boardHeight, () => 0);
@@ -30,7 +32,7 @@
       renderBoard(board, float);
     }
     [board, float] = iterBoard(board, float);
-    setTimeout(step, gameStepIntervalMs);
+    if (!isGameOver(board)) setTimeout(step, gameStepIntervalMs);
   };
 
   step();
@@ -60,7 +62,7 @@ function newBoard(width = 10, height = 20, fillCell = () => randomInt(0, 1)) {
 function newFloat(boardWidth, size = 4) {
   return {
     value: randomGroup(size),
-    x: Math.round(boardWidth / 2),
+    x: Math.floor(boardWidth / 2),
     y: 0,
   };
 }
@@ -140,9 +142,9 @@ function iterBoard(board, float) {
   const nextBoard = board.map(iterColumn);
   const nextFloat = { ...float, y: float.y + 1 };
 
-  const hasDropped = float.value.some(([x, y]) => {
-    const column = board[x + float.x];
-    const nextY = y + float.y + 1;
+  const hasDropped = nextFloat.value.some(([x, y]) => {
+    const column = board[x + nextFloat.x];
+    const nextY = y + nextFloat.y;
     return column[nextY] || nextY == column.length;
   });
 
@@ -193,6 +195,15 @@ function getBottomContiguous(board) {
     count = i + 1;
   }
   return count;
+}
+
+/**
+ * Check if game board is in over state
+ * @param {readonly (readonly number[])[]} board
+ * @returns {boolean}
+ */
+function isGameOver(board) {
+  return board.some((cells) => cells.lastIndexOf(0) < 0);
 }
 
 /**
