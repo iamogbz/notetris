@@ -181,14 +181,14 @@ function drawBoard(elemId, gameBoard, boardHighlight) {
     const cell = document.createElement("div");
     cell.style.width = "20px";
     cell.style.height = cell.style.width;
-    cell.style.border = `1px solid rgba(0,0,0,.5)`;
+    cell.style.border = `1px solid rgba(0,0,0,.2)`;
     cell.style.margin = "none";
     cell.style.backgroundColor = value
       ? `rgba(${
           y >= bottomIndex
-            ? "128,0,0"
+            ? "196,0,0"
             : boardHighlight[x][y]
-            ? "0,32,128"
+            ? "0,64,196"
             : "32,32,32"
         },1)`
       : "white";
