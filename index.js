@@ -5,8 +5,23 @@
   const boardElemId = "game-board";
   const gameStepIntervalMs = 300;
   const clearStepIntervalMs = gameStepIntervalMs / 2;
+  const actions = Object.freeze({
+    left: "ArrowLeft",
+    right: "ArrowRight",
+    down: "ArrowDown",
+    rotate: "ArrowUp",
+  });
+  /** @type {string[]} */ const userActions = [];
 
   // game actions
+  document.addEventListener("keydown", (e) => {
+    if (Object.values(actions).map(String).includes(e.key)) {
+      e.preventDefault();
+      userActions.push(e.key);
+      step(true);
+    }
+  });
+
   /**
    * Render current game board including floating tiles
    * @param {readonly (readonly number[])[]} b
@@ -18,23 +33,64 @@
       gameBoard[x + f.x][y + f.y] = 1;
     });
     drawBoard(boardElemId, gameBoard);
-  };
+  }
+
+  /**
+   * Apply actions to game board
+   * @param {readonly (readonly number[])[]} b
+   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; }} f
+   * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number}]}
+   */
+  function applyActions(b, f) {
+    const board = cloneBoard(b);
+    const float = { ...f };
+    const boardWidth = board.length;
+    const floatWidth = getTileGroupWidth(float.value);
+    const floatHeight = getTileGroupHeight(float.value);
+
+    userActions.splice(0).forEach((action) => {
+      if (action === actions.left) {
+        float.x = Math.max(float.x - 1, 0);
+      } else if (action === actions.right) {
+        float.x = Math.min(float.x + 1, boardWidth - floatWidth - 1);
+      } else if (action === actions.down) {
+        const topY = Math.min(
+          ...board
+            .slice(float.x, float.x + floatWidth)
+            .map((column) => column.lastIndexOf(0))
+        );
+        float.y = topY - floatHeight;
+        // TODO: fix bug where tile vanishes after dropping and freezes the game
+        // Seems to always be the long vertical one
+      } else if (action === actions.rotate) {
+        // TODO: look up matrix rotation
+      }
+    });
+    return [board, float];
+  }
 
   // Create new updatable game board
   let board = newBoard(boardWidth, boardHeight, () => 0);
   let float = newFloat(boardWidth);
 
   // game step function
-  const step = async () => {
+  let stepTimeout = null;
+  const step = async (userActionsOnly) => {
+    clearTimeout(stepTimeout);
+    [board, float] = applyActions(board, float);
     renderBoard(board, float);
-    const score = getBottomContiguous(board);
-    for (let i = 0; i < score; i++) {
-      board = removeBottomRow(board);
-      await delay(clearStepIntervalMs);
-      renderBoard(board, float);
+    if (!userActionsOnly) {
+      const score = getBottomContiguous(board);
+      for (let i = 0; i < score; i++) {
+        board = removeBottomRow(board);
+        await delay(clearStepIntervalMs);
+        renderBoard(board, float);
+      }
+      [board, float] = iterBoard(board, float);
     }
-    [board, float] = iterBoard(board, float);
-    if (!isGameOver(board)) setTimeout(step, gameStepIntervalMs);
+    if (!isGameOver(board)) {
+      stepTimeout = setTimeout(step, gameStepIntervalMs);
+    }
   };
 
   step();
@@ -63,7 +119,7 @@ function newBoard(width = 10, height = 20, fillCell = () => randomInt(0, 1)) {
  */
 function newFloat(boardWidth, length = 4) {
   const value = randomGroup(length);
-  const floatWidth = tileGroupWidth(value);
+  const floatWidth = getTileGroupWidth(value);
   return {
     value,
     x: Math.floor((boardWidth - floatWidth) / 2),
@@ -76,9 +132,19 @@ function newFloat(boardWidth, length = 4) {
  * @param {readonly (readonly number[])[]} value
  * @returns {number}
  */
-function tileGroupWidth(value) {
-  const xs = value.map(([x, _]) => x);
+function getTileGroupWidth(value) {
+  const xs = value.map((v) => v[0]);
   return Math.max(...xs) - Math.min(...xs);
+}
+
+/**
+ * Get height of tile group on y axis
+ * @param {readonly (readonly number[])[]} value
+ * @returns {number}
+ */
+function getTileGroupHeight(value) {
+  const ys = value.map((v) => v[1]);
+  return Math.max(...ys) - Math.min(...ys);
 }
 
 /**
@@ -285,30 +351,34 @@ function randomGroup(n = 4) {
   }
 
   let lastTile = "0,0";
-  let [minX, minY] = hydrateTile(lastTile);
-
   const group = new Set([lastTile]);
-  // TODO: look up matrix rotation
   while (group.size < n) {
     const lastTileHydrated = hydrateTile(lastTile);
     const leftOrRight = randomInt(-1, 1);
     const nextX = lastTileHydrated[0] + leftOrRight;
     const nextY =
       lastTileHydrated[1] + (Math.abs(leftOrRight) ? 0 : randomInt(-1, 1));
-    if (nextX < minX) minX = nextX;
-    if (nextY < minY) minY = nextY;
     lastTile = dehydrateTile([nextX, nextY]);
     group.add(lastTile);
   }
 
   return Object.freeze(
-    Array.from(group)
-      .sort()
-      .map((t) => {
-        const tile = hydrateTile(t);
-        return [tile[0] - minX, tile[1] - minY];
-      })
+    normaliseTileGroup(Array.from(group).sort().map(hydrateTile))
   );
+}
+
+/**
+ * Reset to be based on 0,0 coordinates
+ * @param {readonly (readonly number[])[]} tileGroup
+ * @returns {readonly (readonly number[])[]}
+ */
+function normaliseTileGroup(tileGroup) {
+  const minX = Math.min(...tileGroup.map((v) => v[0]));
+  const minY = Math.min(...tileGroup.map((v) => v[1]));
+
+  return tileGroup.map((tile) => {
+    return [tile[0] - minX, tile[1] - minY];
+  });
 }
 
 /**
