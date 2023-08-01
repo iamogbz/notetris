@@ -25,7 +25,7 @@
   /**
    * Render current game board including floating tiles
    * @param {readonly (readonly number[])[]} b
-   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; } | null} f
+   * @param {{ value: readonly (readonly [number, number])[]; x: number; y: number; } | null} f
    * @param {readonly (readonly number[])[]} bh
    */
   function renderBoard(b, f, bh) {
@@ -39,14 +39,15 @@
   /**
    * Apply actions to game board
    * @param {readonly (readonly number[])[]} b
-   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; } | null} f
-   * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number} | null]}
+   * @param {{ value: readonly (readonly [number, number])[]; x: number; y: number; } | null} f
+   * @returns {[readonly (readonly number[])[], {value: readonly (readonly [number, number])[], x: number, y: number} | null]}
    */
   function applyActions(b, f) {
     if (isGameOver(b)) return [b, f];
     const board = cloneBoard(b);
     let float = f && { ...f };
     const boardWidth = board.length;
+    const boardHeight = board[0].length;
     if (float) {
       const floatWidth = getTileGroupWidth(float.value);
       userActions.splice(0).forEach((action) => {
@@ -61,7 +62,11 @@
           copyBoardAIntoB(nextBoard, board);
           float = null;
         } else if (action === actions.rotate) {
-          // TODO: look up matrix rotation
+          float.value = rotateTileGroup(float.value);
+          const rotatedFloatWidth = getTileGroupWidth(float.value);
+          const rotatedFloatHeight = getTileGroupHeight(float.value);
+          float.x = Math.min(float.x, boardWidth - rotatedFloatWidth - 1);
+          float.y = Math.min(float.y, boardHeight - rotatedFloatHeight - 1);
         }
       });
     }
@@ -123,7 +128,7 @@ function newBoard(width, height, fillCell = () => 0) {
  * Create new floating group at default position
  * @param {number} boardWidth
  * @param {number} length
- * @returns {{ value: readonly (readonly number[])[]; x: number; y: number; }}
+ * @returns {{ value: readonly (readonly [number, number])[]; x: number; y: number; }}
  */
 function newFloat(boardWidth, length = 4) {
   const value = randomGroup(length);
@@ -137,7 +142,7 @@ function newFloat(boardWidth, length = 4) {
 
 /**
  * Get width of tile group on x axis
- * @param {readonly (readonly number[])[]} value
+ * @param {readonly (readonly [number, number])[]} value
  * @returns {number}
  */
 function getTileGroupWidth(value) {
@@ -147,7 +152,7 @@ function getTileGroupWidth(value) {
 
 /**
  * Get height of tile group on y axis
- * @param {readonly (readonly number[])[]} value
+ * @param {readonly (readonly [number, number])[]} value
  * @returns {number}
  */
 function getTileGroupHeight(value) {
@@ -222,8 +227,8 @@ function drawBoard(elemId, gameBoard, boardHighlight) {
 /**
  * Iterate board into next state i.e. moving all cells that can be moved downwards
  * @param {readonly (readonly number[])[]} board
- * @param {{value: readonly (readonly number[])[], x: number, y: number} | null} float
- * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number} | null]}
+ * @param {{value: readonly (readonly [number, number])[], x: number, y: number} | null} float
+ * @returns {[readonly (readonly number[])[], {value: readonly (readonly [number, number])[], x: number, y: number} | null]}
  */
 function iterBoard(board, float) {
   /**
@@ -271,7 +276,7 @@ function boardDiff(boardA, boardB) {
 
 /**
  * @param {readonly (readonly number[])[]} board
- * @param {{value: readonly (readonly number[])[], x: number, y: number} | null} float
+ * @param {{value: readonly (readonly [number, number])[], x: number, y: number} | null} float
  * @returns {number[][]}
  */
 function dropFloatingTiles(board, float) {
@@ -371,7 +376,7 @@ async function delay(delayMs) {
 /**
  * Create a tile group that can be placed
  * @param {number} n number of tiles in group
- * @returns {readonly (readonly number[])[]} new tile group
+ * @returns {readonly (readonly [number, number])[]} new tile group
  */
 function randomGroup(n = 4) {
   /**
@@ -385,10 +390,11 @@ function randomGroup(n = 4) {
   /**
    * Turn string tile into js number object
    * @param {string} t
-   * @returns {readonly number[]}
+   * @returns {readonly [number, number]}
    */
   function hydrateTile(t) {
-    return Object.freeze(t.split(",").map(Number));
+    const [x, y] = t.split(",").map(Number);
+    return Object.freeze([x, y]);
   }
 
   let lastTile = "0,0";
@@ -409,9 +415,17 @@ function randomGroup(n = 4) {
 }
 
 /**
+ * @param {readonly (readonly [number, number])[]} tileGroup
+ * @return {readonly (readonly [number, number])[]}
+ */
+function rotateTileGroup(tileGroup) {
+  return normaliseTileGroup(tileGroup.map(([x, y]) => [-y, x]));
+}
+
+/**
  * Reset to be based on 0,0 coordinates
- * @param {readonly (readonly number[])[]} tileGroup
- * @returns {readonly (readonly number[])[]}
+ * @param {readonly (readonly [number, number])[]} tileGroup
+ * @returns {readonly (readonly [number, number])[]}
  */
 function normaliseTileGroup(tileGroup) {
   const minX = Math.min(...tileGroup.map((v) => v[0]));
