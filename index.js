@@ -26,13 +26,14 @@
    * Render current game board including floating tiles
    * @param {readonly (readonly number[])[]} b
    * @param {{ value: readonly (readonly number[])[]; x: number; y: number; } | null} f
+   * @param {readonly (readonly number[])[]} bh
    */
-  function renderBoard(b, f) {
+  function renderBoard(b, f, bh) {
     const gameBoard = cloneBoard(b);
     f?.value.forEach(([x, y]) => {
       gameBoard[x + f.x][y + f.y] = 1;
     });
-    drawBoard(boardElemId, gameBoard);
+    drawBoard(boardElemId, gameBoard, bh);
   }
 
   /**
@@ -42,6 +43,7 @@
    * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number} | null]}
    */
   function applyActions(b, f) {
+    if (isGameOver(b)) return [b, f];
     const board = cloneBoard(b);
     let float = f && { ...f };
     const boardWidth = board.length;
@@ -54,7 +56,9 @@
         } else if (action === actions.right) {
           float.x = Math.min(float.x + 1, boardWidth - floatWidth - 1);
         } else if (action === actions.down) {
-          copyBoardAIntoB(dropFloatingTiles(board, float), board);
+          const nextBoard = dropFloatingTiles(board, float);
+          boardHighlight = boardDiff(board, nextBoard);
+          copyBoardAIntoB(nextBoard, board);
           float = null;
         } else if (action === actions.rotate) {
           // TODO: look up matrix rotation
@@ -65,43 +69,49 @@
   }
 
   // Create new updatable game board
-  let board = newBoard(boardWidth, boardHeight, () => 0);
+  let board = newBoard(boardWidth, boardHeight);
+  let boardHighlight = cloneBoard(board);
   let float = null;
 
   // game step function
   let stepTimeout = null;
   const step = async (/** @type {boolean | undefined} */ userActionsOnly) => {
     clearTimeout(stepTimeout);
+    if (isGameOver(board)) return;
+
     if (!float) {
       float = newFloat(boardWidth);
     }
     [board, float] = applyActions(board, float);
-    renderBoard(board, float);
+    renderBoard(board, float, boardHighlight);
+
     if (!userActionsOnly) {
       const score = getBottomContiguous(board);
       for (let i = 0; i < score; i++) {
         board = removeBottomRow(board);
         await delay(clearStepIntervalMs);
-        renderBoard(board, float);
+        renderBoard(board, float, boardHighlight);
       }
-      [board, float] = iterBoard(board, float);
+      const [nextBoard, nextFloat] = iterBoard(board, float);
+      boardHighlight = boardDiff(board, nextBoard);
+      board = nextBoard;
+      float = nextFloat;
     }
-    if (!isGameOver(board)) {
-      stepTimeout = setTimeout(step, gameStepIntervalMs);
-    }
+
+    stepTimeout = setTimeout(step, gameStepIntervalMs);
   };
 
   step();
 })();
 
 /**
- * Create new empty game board
+ * Create new game board
  * @param {number} width
  * @param {number} height
  * @param {() => number} fillCell
  * @returns {readonly (readonly number[])[]}
  */
-function newBoard(width = 10, height = 20, fillCell = () => randomInt(0, 1)) {
+function newBoard(width, height, fillCell = () => 0) {
   return Object.freeze(
     new Array(width)
       .fill(undefined)
@@ -149,25 +159,33 @@ function getTileGroupHeight(value) {
  * Draw on the screen the contents of the game board
  * @param {string} elemId
  * @param {number[][]} gameBoard
+ * @param {readonly (readonly number[])[]} boardHighlight
  */
-function drawBoard(elemId, gameBoard) {
+function drawBoard(elemId, gameBoard, boardHighlight) {
   const score = getBottomContiguous(gameBoard);
   const bottomIndex = gameBoard[0].length - score;
 
   /**
    * Create cell for board render
    * @param {number} value
-   * @param {number} index
+   * @param {number} x
+   * @param {number} y
    * @returns {HTMLDivElement}
    */
-  function createCell(value, index) {
+  function createCell(value, x, y) {
     const cell = document.createElement("div");
     cell.style.width = "20px";
     cell.style.height = cell.style.width;
     cell.style.border = `1px solid rgba(0,0,0,.5)`;
     cell.style.margin = "none";
     cell.style.backgroundColor = value
-      ? `rgba(${index >= bottomIndex ? "128,0,0" : "32,32,32"},1)`
+      ? `rgba(${
+          y >= bottomIndex
+            ? "128,0,0"
+            : boardHighlight[x][y]
+            ? "0,32,128"
+            : "32,32,32"
+        },1)`
       : "white";
     return cell;
   }
@@ -175,13 +193,16 @@ function drawBoard(elemId, gameBoard) {
   /**
    * Create board column to be rendered
    * @param {number[]} cells
+   * @param {number} x
    */
-  function createColumn(cells) {
+  function createColumn(cells, x) {
     const rowWrapper = document.createElement("div");
     rowWrapper.style.display = "flex-row";
     rowWrapper.style.alignItems = "center";
     rowWrapper.style.justifyContent = "center";
-    cells.map(createCell).forEach((elem) => rowWrapper.appendChild(elem));
+    cells.forEach((value, y) =>
+      rowWrapper.appendChild(createCell(value, x, y))
+    );
     return rowWrapper;
   }
 
@@ -193,7 +214,7 @@ function drawBoard(elemId, gameBoard) {
   boardWrapper.style.alignItems = "center";
   boardWrapper.style.justifyContent = "center";
   boardWrapper.innerHTML = ""; // reset before drawing elements
-  gameBoard.forEach((row) => boardWrapper.appendChild(createColumn(row)));
+  gameBoard.forEach((row, i) => boardWrapper.appendChild(createColumn(row, i)));
 
   // highlight bottom rows that are contiguous
 }
@@ -233,29 +254,36 @@ function iterBoard(board, float) {
 }
 
 /**
- * Compare two boards for equality
+ * Compare two boards and return cell difference
  * @param {readonly (readonly number[])[]} boardA
  * @param {readonly (readonly number[])[]} boardB
- * @returns {boolean}
+ * @returns {number[][]}
  */
-function boardEquals(boardA, boardB) {
-  return JSON.stringify(boardA) == JSON.stringify(boardB);
+function boardDiff(boardA, boardB) {
+  const diff = cloneBoard(newBoard(boardA.length, boardA[0].length));
+  boardA.forEach((column, x) => {
+    column.forEach((cellValue, y) => {
+      diff[x][y] = Number(cellValue != boardB[x][y]);
+    });
+  });
+  return diff;
 }
 
 /**
- * @param {number[][]} board
+ * @param {readonly (readonly number[])[]} board
  * @param {{value: readonly (readonly number[])[], x: number, y: number} | null} float
  * @returns {number[][]}
  */
 function dropFloatingTiles(board, float) {
+  const nextBoard = cloneBoard(board);
   const lastIndexes = {};
   float?.value.forEach(([x, y]) => {
-    const cells = board[x + float.x];
+    const cells = nextBoard[x + float.x];
     const dropIndex = lastIndexes[x] || cells.lastIndexOf(0);
     lastIndexes[x] -= 1;
     cells[dropIndex] = 1;
   });
-  return board;
+  return nextBoard;
 }
 
 /**
