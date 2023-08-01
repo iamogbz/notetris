@@ -25,11 +25,11 @@
   /**
    * Render current game board including floating tiles
    * @param {readonly (readonly number[])[]} b
-   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; }} f
+   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; } | null} f
    */
   function renderBoard(b, f) {
     const gameBoard = cloneBoard(b);
-    f.value.forEach(([x, y]) => {
+    f?.value.forEach(([x, y]) => {
       gameBoard[x + f.x][y + f.y] = 1;
     });
     drawBoard(boardElemId, gameBoard);
@@ -38,45 +38,43 @@
   /**
    * Apply actions to game board
    * @param {readonly (readonly number[])[]} b
-   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; }} f
-   * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number}]}
+   * @param {{ value: readonly (readonly number[])[]; x: number; y: number; } | null} f
+   * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number} | null]}
    */
   function applyActions(b, f) {
     const board = cloneBoard(b);
-    const float = { ...f };
+    let float = f && { ...f };
     const boardWidth = board.length;
-    const floatWidth = getTileGroupWidth(float.value);
-    const floatHeight = getTileGroupHeight(float.value);
-
-    userActions.splice(0).forEach((action) => {
-      if (action === actions.left) {
-        float.x = Math.max(float.x - 1, 0);
-      } else if (action === actions.right) {
-        float.x = Math.min(float.x + 1, boardWidth - floatWidth - 1);
-      } else if (action === actions.down) {
-        const topY = Math.min(
-          ...board
-            .slice(float.x, float.x + floatWidth)
-            .map((column) => column.lastIndexOf(0))
-        );
-        float.y = topY - floatHeight;
-        // TODO: fix bug where tile vanishes after dropping and freezes the game
-        // Seems to always be the long vertical one
-      } else if (action === actions.rotate) {
-        // TODO: look up matrix rotation
-      }
-    });
+    if (float) {
+      const floatWidth = getTileGroupWidth(float.value);
+      userActions.splice(0).forEach((action) => {
+        if (!float) return;
+        if (action === actions.left) {
+          float.x = Math.max(float.x - 1, 0);
+        } else if (action === actions.right) {
+          float.x = Math.min(float.x + 1, boardWidth - floatWidth - 1);
+        } else if (action === actions.down) {
+          copyBoardAIntoB(dropFloatingTiles(board, float), board);
+          float = null;
+        } else if (action === actions.rotate) {
+          // TODO: look up matrix rotation
+        }
+      });
+    }
     return [board, float];
   }
 
   // Create new updatable game board
   let board = newBoard(boardWidth, boardHeight, () => 0);
-  let float = newFloat(boardWidth);
+  let float = null;
 
   // game step function
   let stepTimeout = null;
-  const step = async (userActionsOnly) => {
+  const step = async (/** @type {boolean | undefined} */ userActionsOnly) => {
     clearTimeout(stepTimeout);
+    if (!float) {
+      float = newFloat(boardWidth);
+    }
     [board, float] = applyActions(board, float);
     renderBoard(board, float);
     if (!userActionsOnly) {
@@ -203,22 +201,10 @@ function drawBoard(elemId, gameBoard) {
 /**
  * Iterate board into next state i.e. moving all cells that can be moved downwards
  * @param {readonly (readonly number[])[]} board
- * @param {{value: readonly (readonly number[])[], x: number, y: number}} float
- * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number}]}
+ * @param {{value: readonly (readonly number[])[], x: number, y: number} | null} float
+ * @returns {[readonly (readonly number[])[], {value: readonly (readonly number[])[], x: number, y: number} | null]}
  */
 function iterBoard(board, float) {
-  /**
-   * Mutate board adding floating tile to it
-   * @param {number[][]} board
-   * @param {{value: readonly (readonly number[])[], x: number, y: number}} float
-   * @returns {undefined}
-   */
-  function boardWithFloatingTiles(board, float) {
-    float.value.forEach(([x, y]) => {
-      board[x + float.x][y + float.y] = 1;
-    });
-  }
-
   /**
    * Iterate column cells
    * @param {readonly number[]} cells
@@ -230,19 +216,17 @@ function iterBoard(board, float) {
     return [0, ...cells.filter((_, i) => i != lastEmptySpace)];
   }
 
-  const boardWidth = board.length;
   const nextBoard = board.map(iterColumn);
-  const nextFloat = { ...float, y: float.y + 1 };
+  const nextFloat = float && { ...float, y: float.y + 1 };
 
-  const hasDropped = nextFloat.value.some(([x, y]) => {
+  const shouldDrop = nextFloat?.value.some(([x, y]) => {
     const column = board[x + nextFloat.x];
     const nextY = y + nextFloat.y;
     return column[nextY] || nextY == column.length;
   });
 
-  if (hasDropped) {
-    boardWithFloatingTiles(nextBoard, float);
-    Object.assign(nextFloat, newFloat(boardWidth));
+  if (shouldDrop) {
+    return [dropFloatingTiles(nextBoard, float), null];
   }
 
   return [nextBoard, nextFloat];
@@ -256,6 +240,35 @@ function iterBoard(board, float) {
  */
 function boardEquals(boardA, boardB) {
   return JSON.stringify(boardA) == JSON.stringify(boardB);
+}
+
+/**
+ * @param {number[][]} board
+ * @param {{value: readonly (readonly number[])[], x: number, y: number} | null} float
+ * @returns {number[][]}
+ */
+function dropFloatingTiles(board, float) {
+  const lastIndexes = {};
+  float?.value.forEach(([x, y]) => {
+    const cells = board[x + float.x];
+    const dropIndex = lastIndexes[x] || cells.lastIndexOf(0);
+    lastIndexes[x] -= 1;
+    cells[dropIndex] = 1;
+  });
+  return board;
+}
+
+/**
+ * Copy board A into mutable board B
+ * @param {readonly (readonly number[])[]} boardA
+ * @param {number[][]} boardB
+ */
+function copyBoardAIntoB(boardA, boardB) {
+  boardA.forEach((column, i) =>
+    column.forEach((v, j) => {
+      boardB[i][j] = v;
+    })
+  );
 }
 
 /**
